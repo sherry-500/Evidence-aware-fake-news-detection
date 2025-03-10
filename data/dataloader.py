@@ -47,22 +47,28 @@ def collate_fn(batch):
     """
     # Each example's format : (<claim>{torch.Tensor}, <claim_source>{torch.Tensor}, evidences{torch.Tensor}, evidences_source{torch.Tensor}, <cred_label>{int})
     claims, claims_source, evidences, evidences_source, targets = zip(*batch)
-
+    
     targets = torch.tensor(targets)
     # padding to the same length
     padded_claims = pad_sequence(claims, batch_first=True)
     padded_claims_source = pad_sequence(claims_source, batch_first=True)
     max_evi_len = max(tensor.shape[1] for tensor in evidences)
     max_evi_src_len = max(tensor.shape[1] for tensor in evidences_source)
+    max_evi_num = 5
+    evidences = list(evidences)
+    evidences_source = list(evidences_source)
     for i, e in enumerate(evidences):
         evidences[i] = F.pad(e, (0, 0, 0, max_evi_len - e.shape[1], 0, 0))
+        max_evi_num = max(max_evi_num, evidences[i].shape[0])
     for i, s in enumerate(evidences_source):
         evidences_source[i] = F.pad(s, (0, 0, 0, max_evi_src_len - s.shape[1], 0, 0))
 
     # padding to the same evidence num 
     padded_evidences = pad_sequence(evidences, batch_first=True)
+    padded_evidences = torch.stack([torch.cat((seqs, torch.zeros(max_evi_num - seqs.shape[0], * seqs.shape[1:], dtype=seqs.dtype)), dim=0) for seqs in padded_evidences])
     padded_evidences_source = pad_sequence(evidences_source, batch_first=True)
-
+    padded_evidences_source = torch.stack([torch.cat((seqs, torch.zeros(max_evi_num - seqs.shape[0], * seqs.shape[1:], dtype=seqs.dtype)), dim=0) for seqs in padded_evidences_source])
+    
     # reserve the length mask of original claim, claim_source, evidence, evidence_source
     claims_len_mask = (padded_claims != 0).any(dim=-1, keepdim=True).int().permute(0, 2, 1)
     claims_source_len_mask = (padded_claims_source != 0).any(dim=-1, keepdim=True).int().permute(0, 2, 1)
