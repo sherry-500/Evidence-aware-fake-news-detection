@@ -31,12 +31,21 @@ def tok2emb_sent(sentence, tokenizer, model):
         return_tensors='pt',
         add_special_tokens=True
     )
-    input_ids = encoding['input_ids'] # token IDs
-    attention_mask = encoding['attention_mask']
+    # input_ids = encoding['input_ids'] # token IDs
+    # attention_mask = encoding['attention_mask']
+    if cuda:
+        encoding = encoding.to('cuda')
+        # input_ids = input_ids.to('cuda')
+        # attention_mask = attention_mask.to('cuda')
+        
     # pass the encoded input through BERT model
     with torch.no_grad():
-        outputs = model(input_ids, attention_mask=attention_mask)
+        outputs = model(**encoding)
         word_embeddings = outputs.last_hidden_state[0, :, :] # batch=0
+        if cuda:
+            word_embeddings = word_embeddings.to('cpu')
+            # input_ids = input_ids.to('cpu')
+            # attention_mask = attention_mask.to('cpu')
     return word_embeddings
 
 def tok2emb_list(sentences, tokenizer, model):
@@ -49,8 +58,6 @@ def tok2emb_list(sentences, tokenizer, model):
     Returns:
         word_embeddings {torch.Tensor}: shape(sentence_num, seq_len, emb_dim)
     """
-    # tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
-    # model = BertModel.from_pretrained('bert-base-uncased')
     encodings = tokenizer.batch_encode_plus(
         sentences,
         padding=True,
@@ -58,11 +65,20 @@ def tok2emb_list(sentences, tokenizer, model):
         return_tensors='pt',
         add_special_tokens=True
     )
-    input_ids = encodings['input_ids']
-    attention_mask = encodings['attention_mask']
+    # input_ids = encodings['input_ids']
+    # attention_mask = encodings['attention_mask']
+    if cuda:
+        encodings = encodings.to('cuda')
+        # input_ids = input_ids.to('cuda')
+        # attention_mask = attention_mask.to('cuda')
+        
     with torch.no_grad():
-        outputs = model(input_ids, attention_mask=attention_mask)
+        outputs = model(**encodings)
         word_embeddings = outputs.last_hidden_state
+        if cuda:
+            word_embeddings = word_embeddings.to('cpu')
+            # input_ids = input_ids.to('cpu')
+            # attention_mask = attention_mask.to('cpu')
     return word_embeddings
 
 class FCDataset(Dataset):
@@ -70,19 +86,25 @@ class FCDataset(Dataset):
     Fake News Detection Dataset
     """
 
-    def __init__(self, data_path, tokenizer, pretrained_model, test=False, cuda=True):
+    def __init__(self, data_path, tokenizer, pretrained_model, cuda=False, test=False):
         """
         Arguments:
             data_path {string} : path of the news dataset (.jsonl file)
             tokenizer: pretrained bert tokenizer
             pretrained_model: pretrained bert model
         """
-        self.cuda = cuda
         self.tokenizer = tokenizer
         self.model = pretrained_model
-        self.examples = self.read_file(data_path)
-        self.max_len_claim = self.examples
+        # self.max_len_claim = self.examples
         self.test = test
+        self.cuda = cuda
+        if cuda:
+            self.model.to('cuda')
+        self.examples = self.read_file(data_path)
+        # random.shuffle(self.examples)
+        if cuda:
+            self.model.to('cpu')
+            torch.cuda.empty_cache()
 
     def read_file(self, data_path):
         """
@@ -95,13 +117,14 @@ class FCDataset(Dataset):
         """
         examples = []
         with open(data_path, 'r') as f:
-            for _, line in enumerate(f):
+            for i, line in enumerate(tqdm(f)):
+                # if i > 3 :
+                #     break
                 data = json.loads(line.strip())
-
                 label = 1 if data['cred_label'] == 'True' else 0
                 # convert sequences into torch.Tensor
-                claim_emb = tok2emb_sent(data['claim'], self.tokenizer, self.model)
-                claim_source_emb = tok2emb_sent(data['claim_source'], self.tokenizer, self.model)
+                claim_emb = tok2emb_sent(data['claim'], self.tokenizer, self.model, self.cuda)
+                claim_source_emb = tok2emb_sent(data['claim_source'], self.tokenizer, self.model, self.cuda)
 
                 evidences = []
                 evidences_source = []
@@ -109,15 +132,16 @@ class FCDataset(Dataset):
                     evidences.append(evidence['evidence'])
                     evidences_source.append(evidence['evidence_source'])
                 
-                evidences_emb = tok2emb_list(evidences, self.tokenizer, self.model)
-                evidences_source_emb = tok2emb_list(evidences_source, self.tokenizer, self.model)
+                evidences_emb = tok2emb_list(evidences, self.tokenizer, self.model, self.cuda)
+                evidences_source_emb = tok2emb_list(evidences_source, self.tokenizer, self.model, self.cuda)
                 example = [claim_emb, claim_source_emb, evidences_emb, evidences_source_emb]
-
-                if self.cuda:
-                    example = [item.cuda() for item in example] + [label]
                 example = example + [label]
                 examples.append(example)
         return examples
+
+    def get_labels(self):
+        _, _, _, _, labels = zip(*(self.examples))
+        return list(labels)
 
     def __len__(self):
         """
@@ -140,4 +164,5 @@ class FCDataset(Dataset):
         """
         example = self.examples[idx]
         target = example[4]
+
         return (example[0], example[1], example[2], example[3], target)
