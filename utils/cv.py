@@ -1,12 +1,20 @@
+import sys
+sys.path.append('..')
 import pandas as pd 
 import os
 from tqdm import tqdm
 import gc
 from collections import defaultdict
 
+from metric import Evaluator, plot_metric
+from model.models import FCModel
+from data.dataloader import BucketSampler, collate_fn
+from data.datasets import FCDataset
+from data.preprocess import df2json
+
 import torch
 import torch.nn as nn
-from torch.utils.data import Dataset, DataLoader, Sampler, Subset
+from torch.utils.data import Dataset, DataLoader, Sampler
 from torch.utils.tensorboard import SummaryWriter
 from torch.optim.lr_scheduler import StepLR
 import torch.nn.functional as F 
@@ -228,14 +236,33 @@ class Trainer():
         writer.close()
         return records
 
-def cross_validation(model_args, configs, k_fold=5):
+def cross_validation(dataset, model_args, configs, k_fold=5):
+    """
+    Arguments:
+        dataset: 'Snopes' or 'PolitiFact'
+    """
+
     fold_num = []
+
+    tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+    model = BertModel.from_pretrained('bert-base-uncased')
+
+    devpath = 'Datasets/%s/mapped_data/dev_ori.tsv' % (dataset)
+    validset = pd.read_csv(devpath, sep='\t', usecols=['cred_label', 'claim_text', 'claim_source', 'evidence', 'evidence_source'])
+    valid_json_file_path = 'valid.jsonl'
+    df2json(validset, valid_json_file_path)
+    validset = FCDataset(valid_json_file_path, tokenizer, bert_model, cuda=True)
+    validset.examples = validset.examples[:-1]
+
+    valid_sampler = BucketSampler(validset, bucket_size=bucket_size, shuffle=True)
+    validset_reader = DataLoader(validset, batch_size=batch_size, sampler=valid_sampler, collate_fn=collate_fn)
+
     for i in range(k_fold):
-        dataset_path1 = f'/kaggle/input/politifact/PolitiFact/mapped_data/5fold/train_{i}.tsv'
-        dataset_path2 = f'/kaggle/input/politifact/PolitiFact/mapped_data/5fold/test_{i}_ori.tsv'
+        train_path = f'Datasets/{dataset}/mapped_data/5fold/train_{i}.tsv'
+        test_path = f'Datasets/{dataset}/mapped_data/5fold/test_{i}_ori.tsv'
         
-        trainset = pd.read_csv(dataset_path1, sep='\t', usecols=['cred_label', 'claim_text', 'claim_source', 'evidence', 'evidence_source'])
-        testset = pd.read_csv(dataset_path2, sep='\t', usecols=['cred_label', 'claim_text', 'claim_source', 'evidence', 'evidence_source'])
+        trainset = pd.read_csv(train_path, sep='\t', usecols=['cred_label', 'claim_text', 'claim_source', 'evidence', 'evidence_source'])
+        testset = pd.read_csv(test_path, sep='\t', usecols=['cred_label', 'claim_text', 'claim_source', 'evidence', 'evidence_source'])
         
         train_json_file_path = f'train_{i}.jsonl'
         test_json_file_path = f'test_{i}.jsonl'
@@ -258,7 +285,7 @@ def cross_validation(model_args, configs, k_fold=5):
             model = nn.DataParallel(model)
     
         trainer = Trainer(model, **configs)
-        records_tmp = trainer.train(None, f'model/{i}/', trainset_reader, validset_reader, testset_reader)
+        records_tmp = trainer.train(None, f'checkpoint/{i}/', trainset_reader, validset_reader, testset_reader)
         plot_metric(metrics=['loss', 'accuracy'], sources=['train', 'valid', 'test'], records=records_tmp)
         plot_metric(metrics=['auc', 'f1_micro', 'f1_macro'], sources=['train', 'valid', 'test'], records=records_tmp)
         
