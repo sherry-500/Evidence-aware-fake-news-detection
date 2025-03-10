@@ -1,3 +1,7 @@
+import torch
+import torch.nn as nn
+import torch.nn.init as init
+import torch.nn.functional as F 
 
 class CoAttention(nn.Module):
     def __init__(self, emb_dim, hidden_dim):
