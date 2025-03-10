@@ -14,27 +14,17 @@ import argparse
 import yaml
 from transformers import BertTokenizer, BertModel
 
-from utils.metric import Evaluator
+from utils.metric import Evaluator, plot_metric
 from model.models import FCModel
 from data.dataloader import BucketSampler, collate_fn
 from data.datasets import FCDataset
 from utils.cv import cross_validation
 
 import torch
-import torch.nn as nn
-import torch.nn.init as init
-from torch.utils.data import Dataset, DataLoader, Sampler, Subset
-from torch.utils.data import random_split
-from torch.utils.tensorboard import SummaryWriter
-from torch.optim.lr_scheduler import StepLR
-import torch.nn.functional as F 
-from transformers import BertTokenizer, BertModel
-from sklearn.model_selection import train_test_split, StratifiedKFold
-from sklearn.metrics import roc_curve, auc, accuracy_score, f1_score, confusion_matrix
-from torch.nn.utils.rnn import pad_sequence
 import optuna
     
 def set_seed(seed):
+    random.seed(3407)
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed(seed)

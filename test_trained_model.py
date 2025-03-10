@@ -1,29 +1,17 @@
 import numpy as np 
 import pandas as pd 
 import os
-import csv
-import random
-import json
 from tqdm import tqdm
 import gc
-import seaborn as sns
-import time
-import subprocess
 import matplotlib.pyplot as plt
-from collections import defaultdict
+
+from utils.metric import Evaluator
+from model.models import FCModel
+from data.datasets import FCDataset
 
 import torch
-import torch.nn as nn
-import torch.nn.init as init
-from torch.utils.data import Dataset, DataLoader, Sampler, Subset
-from torch.utils.data import random_split
-from torch.utils.tensorboard import SummaryWriter
-from torch.optim.lr_scheduler import StepLR
-import torch.nn.functional as F 
 from transformers import BertTokenizer, BertModel
-from sklearn.model_selection import train_test_split, StratifiedKFold
 from sklearn.metrics import roc_curve, auc, accuracy_score, f1_score, confusion_matrix
-from torch.nn.utils.rnn import pad_sequence
 import optuna
 
 def test_model(model_path, dataset_reader, name):
@@ -96,3 +84,19 @@ def test_model(model_path, dataset_reader, name):
     gc.collect()
 
     return evaluator
+
+if __name__ == "__main__":
+    tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+    model = BertModel.from_pretrained('bert-base-uncased')
+
+    for i in range(5):
+        model_path = f'checkpoint/{i}/checkpoint.pt'
+        
+        test_json_file_path = f'test_{i}.jsonl'
+        testset = FCDataset(test_json_file_path, tokenizer, bert_model, cuda=True)
+        if len(testset.examples) % 32 == 1:
+            testset.examples = testset.examples[:-1]
+        test_sampler = BucketSampler(testset, bucket_size=bucket_size, shuffle=True)
+        testset_reader = DataLoader(testset, batch_size=batch_size, sampler=test_sampler, collate_fn=collate_fn)
+
+        test_model(model_path, testset_reader, 'testset')
