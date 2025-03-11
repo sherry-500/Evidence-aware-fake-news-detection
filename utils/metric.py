@@ -71,7 +71,7 @@ class Evaluator(object):
         f1_micro = 2 * (precision_micro * recall_micro) / (precision_micro + recall_micro)
         return f1_micro
 
-def plot_metric(metrics, sources, records, colors=['#1f77b4', 'orange', 'green']):
+def plot_metric(name, metrics, sources, records, colors=['#1f77b4', 'orange', 'green']):
     fig, axs = plt.subplots(1, len(metrics), figsize=(5 * len(metrics), 5))
     for i, metric in enumerate(metrics):
         epochs = range(1, len(records[metric][sources[0]]) + 1)
@@ -85,3 +85,4 @@ def plot_metric(metrics, sources, records, colors=['#1f77b4', 'orange', 'green']
     
     plt.tight_layout()
     plt.show()
+    plt.savefig(f"img/{name}.png")

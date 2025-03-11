@@ -6,11 +6,11 @@ from tqdm import tqdm
 import gc
 from collections import defaultdict
 
-from metric import Evaluator, plot_metric
 from model.models import FCModel
 from data.dataloader import BucketSampler, collate_fn
 from data.datasets import FCDataset
 from data.preprocess import df2json
+from utils.metric import Evaluator, plot_metric
 
 import torch
 import torch.nn as nn
@@ -102,7 +102,7 @@ class Trainer():
         if not os.path.exists(outdir):
             os.makedirs(outdir)
 
-        writer = SummaryWriter(log_dir='./log')
+        # writer = SummaryWriter(log_dir='./log')
         # scheduler = StepLR(self.optimizer, step_size=40, gamma=0.1)
         early_stopping = EarlyStopping(outdir + 'checkpoint.pt', patience=10, verbose=True)
     
@@ -137,10 +137,10 @@ class Trainer():
             # update learning rate
             # scheduler.step()
 
-            for name, param in self.model.named_parameters():
-                if param.grad is not None:
-                    writer.add_histogram(tag=name+'_grad', values=param.grad.clone().cpu().data.numpy(), global_step=epoch + 1)
-                    writer.add_histogram(tag=name+'_data', values=param.clone().cpu().data.numpy(), global_step=epoch + 1)
+            # for name, param in self.model.named_parameters():
+            #     if param.grad is not None:
+            #         writer.add_histogram(tag=name+'_grad', values=param.grad.clone().cpu().data.numpy(), global_step=epoch + 1)
+            #         writer.add_histogram(tag=name+'_data', values=param.clone().cpu().data.numpy(), global_step=epoch + 1)
                 
             
             train_loss = train_loss / len(trainset_reader)
@@ -233,7 +233,7 @@ class Trainer():
                 print("Early stopping")
                 # break
 
-        writer.close()
+        # writer.close()
         return records
 
 def cross_validation(dataset, model_args, configs, k_fold=5):
@@ -241,11 +241,14 @@ def cross_validation(dataset, model_args, configs, k_fold=5):
     Arguments:
         dataset: 'Snopes' or 'PolitiFact'
     """
+    bucket_size = 128
+    batch_size = 32
+    max_epochs = 1
 
     fold_num = []
 
     tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
-    model = BertModel.from_pretrained('bert-base-uncased')
+    bert_model = BertModel.from_pretrained('bert-base-uncased')
 
     devpath = 'Datasets/%s/mapped_data/dev_ori.tsv' % (dataset)
     validset = pd.read_csv(devpath, sep='\t', usecols=['cred_label', 'claim_text', 'claim_source', 'evidence', 'evidence_source'])
@@ -286,8 +289,8 @@ def cross_validation(dataset, model_args, configs, k_fold=5):
     
         trainer = Trainer(model, **configs)
         records_tmp = trainer.train(None, f'checkpoint/{i}/', trainset_reader, validset_reader, testset_reader)
-        plot_metric(metrics=['loss', 'accuracy'], sources=['train', 'valid', 'test'], records=records_tmp)
-        plot_metric(metrics=['auc', 'f1_micro', 'f1_macro'], sources=['train', 'valid', 'test'], records=records_tmp)
+        plot_metric(f'i_1', metrics=['loss', 'accuracy'], sources=['train', 'valid', 'test'], records=records_tmp)
+        plot_metric(f'i_2', metrics=['auc', 'f1_micro', 'f1_macro'], sources=['train', 'valid', 'test'], records=records_tmp)
         
         if i == 0:
             records = records_tmp

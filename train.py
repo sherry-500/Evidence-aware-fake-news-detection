@@ -39,12 +39,12 @@ def parse_args():
     return args
 
 if __name__ == "__main__":
-    set_seed(seed)
-
     bucket_size = 128
     batch_size = 32
-    max_epochs = 50
+    max_epochs = 1
     seed = 42
+    
+    set_seed(seed)
 
     args = parse_args()
 
@@ -62,9 +62,9 @@ if __name__ == "__main__":
         'cuda': True
     }
 
-    records = cross_validation(dataset=args.dataset, model_args, configs)
+    records = cross_validation(args.dataset, model_args, configs)
 
-    plot_metric(metrics=['loss', 'accuracy'], sources=['train', 'valid', 'test'], records=records)
-    plot_metric(metrics=['auc', 'f1_micro', 'f1_macro'], sources=['train', 'valid', 'test'], records=records)
-    plot_metric(metrics=['precision_0', 'recall_0', 'f1_0'], sources=['train', 'valid'], records=records)
-    plot_metric(metrics=['precision_1', 'recall_1', 'f1_1'], sources=['train', 'valid'], records=records)
+    plot_metric('avg_1', metrics=['loss', 'accuracy'], sources=['train', 'valid', 'test'], records=records)
+    plot_metric('avg_2', metrics=['auc', 'f1_micro', 'f1_macro'], sources=['train', 'valid', 'test'], records=records)
+    plot_metric('avg_3', metrics=['precision_0', 'recall_0', 'f1_0'], sources=['train', 'valid'], records=records)
+    plot_metric('avg_4', metrics=['precision_1', 'recall_1', 'f1_1'], sources=['train', 'valid'], records=records)

@@ -4,13 +4,14 @@ import os
 import csv
 import random
 import json
+from tqdm import tqdm
 
 import torch
 from torch.utils.data import Dataset
 import torch.nn.functional as F 
 from transformers import BertTokenizer, BertModel
 
-def tok2emb_sent(sentence, tokenizer, model):
+def tok2emb_sent(sentence, tokenizer, model, cuda):
     """
     Convert the input sequence into its word embedding with the pretrained bert model
     Arguments:
@@ -48,7 +49,7 @@ def tok2emb_sent(sentence, tokenizer, model):
             # attention_mask = attention_mask.to('cpu')
     return word_embeddings
 
-def tok2emb_list(sentences, tokenizer, model):
+def tok2emb_list(sentences, tokenizer, model, cuda):
     """
     Convert the input sequences into its word embedding with the pretrained bert model
     Arguments:
