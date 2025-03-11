@@ -62,6 +62,9 @@ if __name__ == "__main__":
         'cuda': True
     }
 
+    if not os.path.exists('img'):
+        os.makedirs('img')
+
     records = cross_validation(args.dataset, model_args, configs)
 
     plot_metric('avg_1', metrics=['loss', 'accuracy'], sources=['train', 'valid', 'test'], records=records)

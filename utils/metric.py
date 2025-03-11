@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd 
+import os
 
 import matplotlib.pyplot as plt
 
@@ -84,5 +85,5 @@ def plot_metric(name, metrics, sources, records, colors=['#1f77b4', 'orange', 'g
         axs[i].grid()
     
     plt.tight_layout()
-    plt.show()
     plt.savefig(f"img/{name}.png")
+    plt.show()

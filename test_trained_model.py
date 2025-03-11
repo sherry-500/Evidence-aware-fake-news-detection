@@ -4,17 +4,20 @@ import os
 from tqdm import tqdm
 import gc
 import matplotlib.pyplot as plt
+import seaborn as sns
 
 from utils.metric import Evaluator
 from model.models import FCModel
 from data.datasets import FCDataset
+from data.dataloader import BucketSampler, collate_fn
 
 import torch
+from torch.utils.data import Dataset, DataLoader, Sampler
 from transformers import BertTokenizer, BertModel
 from sklearn.metrics import roc_curve, auc, accuracy_score, f1_score, confusion_matrix
 import optuna
 
-def test_model(model_path, dataset_reader, name):
+def test_model(fold_id, model_path, dataset_reader, name):
     model_args = {
         # 'hidden_dim': trial.params['hidden_dim'],
         'hidden_dim': 48,
@@ -77,6 +80,7 @@ def test_model(model_path, dataset_reader, name):
     axes[2, 1].set_title('Histogram of fn')
     # show plot
     plt.tight_layout()
+    plt.savefig(f"img/test_{fold_id}.png")
     plt.show()
 
     model.to('cpu')
@@ -86,8 +90,12 @@ def test_model(model_path, dataset_reader, name):
     return evaluator
 
 if __name__ == "__main__":
+    bucket_size = 128
+    batch_size = 32
+    max_epochs = 1
+
     tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
-    model = BertModel.from_pretrained('bert-base-uncased')
+    bert_model = BertModel.from_pretrained('bert-base-uncased')
 
     for i in range(5):
         model_path = f'checkpoint/{i}/checkpoint.pt'
@@ -99,4 +107,4 @@ if __name__ == "__main__":
         test_sampler = BucketSampler(testset, bucket_size=bucket_size, shuffle=True)
         testset_reader = DataLoader(testset, batch_size=batch_size, sampler=test_sampler, collate_fn=collate_fn)
 
-        test_model(model_path, testset_reader, 'testset')
+        test_model(i, model_path, testset_reader, 'testset')
