@@ -5,9 +5,11 @@ import os
 from tqdm import tqdm
 import gc
 from collections import defaultdict
+import math
+import heapq
 
 from model.models import FCModel
-from data.dataloader import BucketSampler, collate_fn
+from data.dataloader import BucketSampler, BalancedBatchSampler, collate_fn
 from data.datasets import FCDataset
 from data.preprocess import df2json
 from utils.metric import Evaluator, plot_metric
@@ -32,8 +34,9 @@ class EarlyStopping:
         self.auc = 0
         self.delta = delta
 
-    def __call__(self, epoch, f1_macro, auc, model):
+    def __call__(self, epoch, f1_macro, auc, f1_macro_test, model):
         score = f1_macro
+        print("Test f1_macro: ", f1_macro_test)
         if score < self.best_f1_ma + self.delta:
             self.counter += 1
             print(f'EarlyStopping counter: {self.counter}/{self.patience}')
@@ -41,6 +44,7 @@ class EarlyStopping:
                 self.early_stop = True
         else:
             self.counter = 0
+            self.early_stop = False
 
         if self.best_f1_ma < f1_macro or (self.best_f1_ma == f1_macro and auc >= self.auc):
             self.save_checkpoint(epoch, f1_macro, auc, model)
@@ -49,11 +53,12 @@ class EarlyStopping:
         if self.verbose:
             print(f'F1_macro increased ({self.best_f1_ma:.6f} --> {f1_macro:.6f}). Saving model ...')
     
-        torch.save({
-                    'epoch': epoch,
-                    'model': model.state_dict(),
-                    'f1_macro': f1_macro
-                }, self.save_path)
+        # torch.save({
+        #             'epoch': epoch,
+        #             'model': model.state_dict(),
+        #             'f1_macro': f1_macro
+        #         }, self.save_path)
+        torch.save(model, self.save_path)
         self.best_f1_ma = f1_macro
         self.auc = auc
 
@@ -79,13 +84,13 @@ class Trainer():
             else:
                 weight_p += [p]
                 
-        # self.optimizer = torch.optim.Adam(
-        #     [{'params': weight_p, 'weight_decay': weight_decay},
-        #      {'params': bias_p, 'weight_decay': 0}
-        #      ], lr=lr
-        # )
         if optimizer_name == "Adam":
-            self.optimizer = torch.optim.Adam(model.parameters(), lr=self.lr)
+            self.optimizer = torch.optim.Adam(
+                [{'params': weight_p, 'weight_decay': 0.001},
+                 {'params': bias_p, 'weight_decay': 0}
+                 ], lr=lr
+            )
+            # self.optimizer = torch.optim.Adam(model.parameters(), lr=self.lr)
         elif optimizer_name == 'SGD':
             self.optimizer = torch.optim.SGD(model.parameters(), lr=self.lr)
         else:
@@ -228,10 +233,18 @@ class Trainer():
                 if trial.should_prune():
                     raise optuna.exceptions.TrialPruned()
                 
-            early_stopping(epoch, records['f1_macro']['valid'][-1], records['auc']['valid'][-1], self.model)
+            early_stopping(epoch, records['f1_macro']['valid'][-1], records['auc']['valid'][-1], records['f1_macro']['test'][-1], self.model)
+            smallest_loss = heapq.nsmallest(2, records['loss']['valid'])
+            if records['loss']['valid'][-1] in smallest_loss:
+                early_stopping.early_stop = False
+                early_stopping.counter = 0
             if early_stopping.early_stop:
-                print("Early stopping")
-                # break
+                if abs(records['loss']['valid'][-1] - records['loss']['train'][-1]) <= 0.02:
+                    early_stopping.early_stop = False
+                    early_stopping.counter = 0
+                else:
+                    print("Early stopping")
+                    break
 
         # writer.close()
         return records
@@ -250,39 +263,40 @@ def cross_validation(dataset, model_args, configs, k_fold=5):
     tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
     bert_model = BertModel.from_pretrained('bert-base-uncased')
 
-    devpath = 'Datasets/%s/mapped_data/dev_ori.tsv' % (dataset)
-    validset = pd.read_csv(devpath, sep='\t', usecols=['cred_label', 'claim_text', 'claim_source', 'evidence', 'evidence_source'])
-    valid_json_file_path = 'valid.jsonl'
-    df2json(validset, valid_json_file_path)
-    validset = FCDataset(valid_json_file_path, tokenizer, bert_model, cuda=True)
-    validset.examples = validset.examples[:-1]
-
-    valid_sampler = BucketSampler(validset, bucket_size=bucket_size, shuffle=True)
-    validset_reader = DataLoader(validset, batch_size=batch_size, sampler=valid_sampler, collate_fn=collate_fn)
-
     for i in range(k_fold):
         train_path = f'Datasets/{dataset}/mapped_data/5fold/train_{i}.tsv'
         test_path = f'Datasets/{dataset}/mapped_data/5fold/test_{i}_ori.tsv'
-        
+        devpath = 'Datasets/%s/mapped_data/dev_ori.tsv' % (dataset)
+
         trainset = pd.read_csv(train_path, sep='\t', usecols=['cred_label', 'claim_text', 'claim_source', 'evidence', 'evidence_source'])
         testset = pd.read_csv(test_path, sep='\t', usecols=['cred_label', 'claim_text', 'claim_source', 'evidence', 'evidence_source'])
-        
+        validset = pd.read_csv(devpath, sep='\t', usecols=['cred_label', 'claim_text', 'claim_source', 'evidence', 'evidence_source'])
+
         train_json_file_path = f'train_{i}.jsonl'
         test_json_file_path = f'test_{i}.jsonl'
+        valid_json_file_path = 'valid.jsonl'
         
         df2json(trainset, train_json_file_path)
         df2json(testset, test_json_file_path)
-        
+        df2json(validset, valid_json_file_path)
+
         trainset = FCDataset(train_json_file_path, tokenizer, bert_model, cuda=True)
         testset = FCDataset(test_json_file_path, tokenizer, bert_model, cuda=True)
+        validset = FCDataset(valid_json_file_path, tokenizer, bert_model, cuda=True)
+        validset.examples = validset.examples[:-1]
+
         if len(testset.examples) % 32 == 1:
             testset.examples = testset.examples[:-1]
 
-        train_sampler = BucketSampler(trainset, bucket_size=bucket_size, shuffle=True)
-        trainset_reader = DataLoader(trainset, batch_size=batch_size, sampler=train_sampler, collate_fn=collate_fn)
+        train_sampler = BalancedBatchSampler(trainset, batch_size=batch_size, shuffle=True)
+        trainset_reader = DataLoader(trainset, batch_sampler=train_sampler, collate_fn=collate_fn(trainset.claim_src_vocab, trainset.evidence_src_vocab))
         test_sampler = BucketSampler(testset, bucket_size=bucket_size, shuffle=True)
-        testset_reader = DataLoader(testset, batch_size=batch_size, sampler=test_sampler, collate_fn=collate_fn)
+        testset_reader = DataLoader(testset, batch_size=batch_size, sampler=test_sampler, collate_fn=collate_fn(trainset.claim_src_vocab, trainset.evidence_src_vocab))
+        valid_sampler = BucketSampler(validset, bucket_size=bucket_size, shuffle=True)
+        validset_reader = DataLoader(validset, batch_size=batch_size, sampler=valid_sampler, collate_fn=collate_fn(trainset.claim_src_vocab, trainset.evidence_src_vocab))
 
+        model_args['claim_src_num'] = len(trainset.claim_src_vocab) + 1
+        model_args['evidence_src_num'] = len(trainset.evidence_src_vocab) + 1
         model = FCModel(**model_args)
         if torch.cuda.device_count() > 1:
             model = nn.DataParallel(model)

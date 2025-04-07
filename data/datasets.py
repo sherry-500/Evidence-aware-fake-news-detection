@@ -101,8 +101,17 @@ class FCDataset(Dataset):
         self.cuda = cuda
         if cuda:
             self.model.to('cuda')
+
+        self.claim_src_vocab = {}
+        self.evidence_src_vocab = {}
+        
         self.examples = self.read_file(data_path)
-        # random.shuffle(self.examples)
+
+        self.class_idx_samples = {i: [] for i in [0, 1]}
+        for i, example in enumerate(self.examples):
+            self.class_idx_samples[example[-1]].append(i)
+        self.class_weight = {key: len(value) / len(self.examples) for key, value in self.class_idx_samples.items()}
+        
         if cuda:
             self.model.to('cpu')
             torch.cuda.empty_cache()
@@ -117,6 +126,10 @@ class FCDataset(Dataset):
             examples {list}: a list containing all examples
         """
         examples = []
+        claim_src_vocab = {}
+        evidence_src_vocab = {}
+        claim_src_idx = 1
+        evidence_src_idx = 1
         with open(data_path, 'r') as f:
             for i, line in enumerate(tqdm(f)):
                 # if i > 3 :
@@ -125,24 +138,38 @@ class FCDataset(Dataset):
                 label = 1 if data['cred_label'] == 'True' else 0
                 # convert sequences into torch.Tensor
                 claim_emb = tok2emb_sent(data['claim'], self.tokenizer, self.model, self.cuda)
-                claim_source_emb = tok2emb_sent(data['claim_source'], self.tokenizer, self.model, self.cuda)
+                claim_source = data['claim_source']
+                if claim_source not in claim_src_vocab:
+                    claim_src_vocab[claim_source] = claim_src_idx
+                    claim_src_idx += 1
 
                 evidences = []
                 evidences_source = []
                 for evidence in data['evidences']:
                     evidences.append(evidence['evidence'])
                     evidences_source.append(evidence['evidence_source'])
+                    if evidence['evidence_source'] not in evidence_src_vocab:
+                        evidence_src_vocab[evidence['evidence_source']] = evidence_src_idx
+                        evidence_src_idx += 1
                 
                 evidences_emb = tok2emb_list(evidences, self.tokenizer, self.model, self.cuda)
-                evidences_source_emb = tok2emb_list(evidences_source, self.tokenizer, self.model, self.cuda)
-                example = [claim_emb, claim_source_emb, evidences_emb, evidences_source_emb]
+                example = [claim_emb, claim_source, evidences_emb, evidences_source]
                 example = example + [label]
                 examples.append(example)
+
+            self.claim_src_vocab = claim_src_vocab
+            self.evidence_src_vocab = evidence_src_vocab
         return examples
 
     def get_labels(self):
         _, _, _, _, labels = zip(*(self.examples))
         return list(labels)
+
+    def get_claim_src_vocab(self):
+        return self.claim_src_vocab
+
+    def get_evidence_src_vocab(self):
+        return self.evidence_src_vocab
 
     def __len__(self):
         """

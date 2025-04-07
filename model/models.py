@@ -152,6 +152,7 @@ class Attention(nn.Module):
         """
         attention = F.softmax(cosine_sim, dim=-1).unsqueeze(1) # shape: (batch_size, 1, evi_num)
         x = attention @ x # shape: (batch_size, 1, input_dim)
+        x = torch.cat([x, cosine_sim.unsqueeze(1)], dim=-1)
         # x = torch.sum(x, dim=1)
         return x
 
@@ -176,15 +177,21 @@ class MLP(nn.Module):
         return out
 
 class FCModel(nn.Module):
-    def __init__(self, hidden_dim, emb_dim, top_k=5):
+    def __init__(self, hidden_dim, emb_dim, claim_src_num, evidence_src_num, top_k=5):
         super().__init__()
+        print(claim_src_num, evidence_src_num)
         self.emb_dim = emb_dim
         self.hidden_dim = hidden_dim
+        self.claim_src_dim = 10
+        self.evidence_src_dim = 20
         self.top_k = top_k
 
+        self.claim_src = nn.Embedding(claim_src_num, self.claim_src_dim)
+        self.evidence_src = nn.Embedding(evidence_src_num, self.evidence_src_dim)
         self.layer_norm = LayerNormalization(emb_dim)
         self.linear_c = nn.Linear(emb_dim, hidden_dim)
         self.linear_e = nn.Linear(emb_dim, hidden_dim)
+        self.relu = nn.ReLU()
         self.co_attention_w = CoAttention(hidden_dim, hidden_dim)
         # self.phrase_extractor_c = PhraseFeatureExtractor(self.emb_dim, self.emb_dim // 16, filter_dims=[3, 5, 6])
         # self.phrase_extractor_e = PhraseFeatureExtractor(self.emb_dim, self.emb_dim // 16, filter_dims=[3, 5, 6])
@@ -193,9 +200,9 @@ class FCModel(nn.Module):
         # self.document_attention_layer = ConcatAttention(hidden_dim * 2, hidden_dim)
         self.document_attention_layer = Attention()
         # self.output_layer = nn.Linear(self.emb_dim * 2, 1)
-        self.output_layer = MLP(hidden_dim * 2, 1)
+        self.output_layer = MLP(hidden_dim * 2 + top_k + self.claim_src_dim, 1)
 
-    def forward(self, claims, claims_source, claims_len_mask, claims_source_len_mask, evidences, evidences_source, evidences_len_mask, evidences_source_len_mask):
+    def forward(self, claims, claims_source, claims_len_mask, evidences, evidences_source, evidences_len_mask, evidence_num_mask):
         """
         Arguments:
             claims: shape(batch_size, claim_len, emb_dim)
@@ -211,11 +218,17 @@ class FCModel(nn.Module):
         # split_evidence = torch.unbind(evidences, dim=1)
         # split_evi_len_mask = torch.unbind(evidences_len_mask, dim=1)
 
-        # claims = self.layer_norm(claims)
-        # evidences = self.layer_norm(evidences)
+        claims = self.layer_norm(claims)
+        evidences = self.layer_norm(evidences)
         
         claims = self.linear_c(claims)
-        evidences = self.linear_c(evidences)
+        evidences = self.linear_e(evidences)
+        
+        c_w_hat, e_w_hat = self.co_attention_w(
+            claims.unsqueeze(1).expand(-1, evi_num, -1, -1),
+            claims_len_mask.unsqueeze(1).expand(-1, evi_num, -1, -1),
+            evidences, evidences_len_mask
+        )   # shape: (batch_size, evi_num, 1, emb_dim)
 
         c_w_hat, e_w_hat = self.co_attention_w(
             claims.unsqueeze(1).expand(-1, evi_num, -1, -1),
@@ -227,10 +240,19 @@ class FCModel(nn.Module):
         c_w_hat = c_w_hat.squeeze(2) # shape: (batch_size, evi_num, emb_dim)
         e_w_hat = e_w_hat.squeeze(2) # shape: (batch_size, evi_num, emb_dim)
         cosine_sim = F.cosine_similarity(c_w_hat, e_w_hat, dim=-1) # shape: (batch_size, evi_num)
+        cosine_sim = cosine_sim.masked_fill(~evidence_num_mask.type(torch.bool), -2)
         top_k_cosine_sim, top_k_indices = torch.topk(cosine_sim, self.top_k, dim=1, largest=True, sorted=True) # shape: (batch_size, top_k)
-        top_k_indices = top_k_indices.unsqueeze(2).repeat(1, 1, self.hidden_dim) # shape: (batch_size, top_k, emb_dim)
-        e_w_hat = torch.gather(e_w_hat, 1, top_k_indices)
-        c_w_hat = torch.gather(c_w_hat, 1, top_k_indices)
+        top_k_indices_1 = top_k_indices.unsqueeze(2).repeat(1, 1, self.hidden_dim) # shape: (batch_size, top_k, emb_dim)
+        e_w_hat = torch.gather(e_w_hat, 1, top_k_indices_1) # shape: (batch_size, top_k, emb_dim)
+        c_w_hat = torch.gather(c_w_hat, 1, top_k_indices_1) # shape: (batch_size, top_k, emb_dim)
+
+        # extend claim and evidence with their source
+        claims_source = self.claim_src(claims_source) # shape: (batch_size, claim_src_emb)
+        claims_source = claims_source.unsqueeze(1).expand(-1, self.top_k, -1) # shape: (batch_size, top_k, claim_src_emb)
+        # evidences_source = torch.gather(evidences_source, 1, top_k_indices) # shape: (batch_size, top_k)
+        # evidences_source = self.evidence_src(evidences_source) # shape: (batch_size, top_k, evidence_src_emb)
+        c_w_hat = torch.cat([c_w_hat, claims_source], dim=-1)
+        # e_w_hat = torch.cat([e_w_hat, evidences_source], dim=-1)
 
         # combine the features from the three level
         combined_feats = self.hierarchy_feature_combinator(c_w_hat, e_w_hat) # shape: (batch_size, top_k, emb_dim * 2)

@@ -5,6 +5,8 @@ from tqdm import tqdm
 import gc
 import matplotlib.pyplot as plt
 import seaborn as sns
+import math
+import heapq
 
 from utils.metric import Evaluator
 from model.models import FCModel
@@ -17,14 +19,16 @@ from transformers import BertTokenizer, BertModel
 from sklearn.metrics import roc_curve, auc, accuracy_score, f1_score, confusion_matrix
 import optuna
 
+import warnings
+warnings.filterwarnings("ignore")
+
 def test_model(fold_id, model_path, dataset_reader, name):
     model_args = {
         # 'hidden_dim': trial.params['hidden_dim'],
         'hidden_dim': 48,
         'emb_dim': 768
     }
-    model = FCModel(**model_args)
-    model.load_state_dict(torch.load(model_path)['model'])
+    model = torch.load(model_path)
     
     model.to('cuda')
     model.eval()
@@ -98,13 +102,18 @@ if __name__ == "__main__":
     bert_model = BertModel.from_pretrained('bert-base-uncased')
 
     for i in range(5):
-        model_path = f'checkpoint/{i}/checkpoint.pt'
+        dataset_path1 = f'Datasets/{dataset}/mapped_data/5fold/train_{i}.tsv'
+        trainset = pd.read_csv(dataset_path1, sep='\t', usecols=['cred_label', 'claim_text', 'claim_source', 'evidence', 'evidence_source'])
+        train_json_file_path = f'train_{i}.jsonl'
+        df2json(trainset, train_json_file_path)
+        trainset = FCDataset(train_json_file_path, tokenizer, bert_model, cuda=True)
         
         test_json_file_path = f'test_{i}.jsonl'
         testset = FCDataset(test_json_file_path, tokenizer, bert_model, cuda=True)
         if len(testset.examples) % 32 == 1:
             testset.examples = testset.examples[:-1]
+
         test_sampler = BucketSampler(testset, bucket_size=bucket_size, shuffle=True)
-        testset_reader = DataLoader(testset, batch_size=batch_size, sampler=test_sampler, collate_fn=collate_fn)
+        testset_reader = DataLoader(testset, batch_size=batch_size, sampler=test_sampler, collate_fn=collate_fn(trainset.claim_src_vocab, trainset.evidence_src_vocab))
 
         test_model(i, model_path, testset_reader, 'testset')
