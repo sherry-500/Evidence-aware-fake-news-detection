@@ -44,9 +44,9 @@ def parse_args():
     return args
 
 if __name__ == "__main__":
-    bucket_size = 128
+    bucket_size = 256
     batch_size = 32
-    max_epochs = 1
+    max_epochs = 100
     seed = 42
     
     set_seed(seed)
@@ -59,7 +59,7 @@ if __name__ == "__main__":
     }
 
     configs = {
-        'lr': 0.00017767799670757544,
+        'lr': 0.00015,
         'optimizer_name': 'Adam',
         'max_epoch': max_epochs,
         'batch_size': batch_size,
