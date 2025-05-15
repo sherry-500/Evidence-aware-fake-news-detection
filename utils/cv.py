@@ -6,6 +6,7 @@ from tqdm import tqdm
 import gc
 import re
 import heapq
+import pickle
 from collections import defaultdict
 
 from model.models import FCModel
@@ -408,9 +409,9 @@ def cross_validation(dataset_name, model_args, configs, k_fold=5):
                     records_tmp[metric][source] = records_tmp[metric][source] + [0] * (target_length - len(records_tmp[metric][source]))
                     records[metric][source] = [records[metric][source][i] + records_tmp[metric][source][i] for i in range(len(records[metric][source]))]
 
-        with open(f'model/{i}/claim_source_vocab.pickle', 'wb') as f:
+        with open(f'checkpoint/{dataset_name}/{i}/claim_source_vocab.pickle', 'wb') as f:
             pickle.dump(trainset.claim_src_vocab, f)
-        with open(f'model/{i}/evidence_source_vocab.pickle', 'wb') as f:
+        with open(f'checkpoint/{dataset_name}/{i}/evidence_source_vocab.pickle', 'wb') as f:
             pickle.dump(trainset.evidence_src_vocab, f)
 
         model.to('cpu')
