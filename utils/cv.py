@@ -5,6 +5,7 @@ import os
 from tqdm import tqdm
 import gc
 import re
+import heapq
 from collections import defaultdict
 
 from model.models import FCModel
@@ -91,6 +92,29 @@ def default_value():
         'valid': [],
         'test': []
     }
+
+class FactCheckingLoss(nn.Module):
+    def __init__(self, alpha=0):
+        super().__init__()
+        self.alpha = alpha
+        self.bce = torch.nn.BCEWithLogitsLoss()
+
+    def forward(self, pred_scores, pred_labels, scores, labels):
+        """
+        Arguments:
+            pred_scores shape(batch_size, evi_num)
+            scores shape(batch_size, evi_num)
+        """
+        pred_scores = torch.log_softmax(pred_scores, dim=-1)
+        scores = torch.softmax(scores, dim=-1)
+        listwise_loss = -torch.sum(scores * pred_scores, dim=-1)
+        rank_loss = listwise_loss.mean()
+        
+        classify_loss = self.bce(pred_labels, labels)
+        
+        total_loss = self.alpha * rank_loss + classify_loss
+        return total_loss
+        return rank_loss
 
 class Trainer():
     def __init__(self, model, lr, optimizer_name, weight_decay, max_epoch, batch_size, alpha=0, gradient_accumulation_steps=1, cuda=False):

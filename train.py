@@ -67,6 +67,7 @@ if __name__ == "__main__":
     configs = {
         'lr': 0.00015,
         'optimizer_name': 'Adam',
+        'weight_decay': 0.001,
         'max_epoch': max_epochs,
         'batch_size': batch_size,
         'gradient_accumulation_steps': 1,

@@ -87,7 +87,7 @@ class CoAttention(nn.Module):
         c_hat = output.flatten(start_dim=-2, end_dim=-1).unsqueeze(2)
         # c_hat = self.linear(c_hat) # shape(batch_size, evi_num, 1, emb_dim)
         
-        return c_hat, e_hat, attention_s
+        return c_hat, e_hat, attention_score1, attention_score2
 
 class LayerNormalization(nn.Module):
     def __init__(self, feats_num, epsilon=1e-6, requires_grad=True):
@@ -233,8 +233,7 @@ class FCModel(nn.Module):
         self.linear_e = nn.Linear(emb_dim, hidden_dim)
         self.similarity = Similarity(hidden_dim * 1)
         self.relu = nn.ReLU()
-        self.co_attention_w = CoAttention(hidden_dim, hidden_dim)
-        # self.co_attention_w = MACAttention1(hidden_dim * 2, hidden_dim, 1)
+        self.co_attention_w = CoAttention(hidden_dim * 2, hidden_dim, 1)
         self.hierarchy_feature_combinator = HierarchyFeatureCombinator(self.emb_dim)
         # self.document_attention_layer = ConcatAttention(hidden_dim * 2, hidden_dim // 2)
         self.document_attention_layer = Attention()
