@@ -318,18 +318,16 @@ def cross_validation(dataset_name, model_args, configs, k_fold=5):
 
     fold_num = []
 
+    top_evidences = load_evidences(f'reoutput/{dataset_name}.json')
+
     tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
     bert_model = BertModel.from_pretrained('bert-base-uncased')
 
     validset = read_data(f'/Datasets/{dataset_name}/mapped_data/', top_evidences, r'dev_ori.tsv')
-    validset = pd.read_csv(devpath, sep='\t', usecols=['cred_label', 'claim_text', 'claim_source', 'evidence', 'evidence_source'])
     valid_json_file_path = 'valid.jsonl'
     df2json(validset, valid_json_file_path)
     validset = FCDataset(valid_json_file_path, tokenizer, bert_model, cuda=True)
     validset.examples = validset.examples[:-1]
-
-    valid_sampler = BucketSampler(validset, bucket_size=bucket_size, shuffle=True)
-    validset_reader = DataLoader(validset, batch_size=batch_size, sampler=valid_sampler, collate_fn=collate_fn)
 
     for i in range(k_fold):
         directory_path = f'Datasets/{dataset_name}/mapped_data/5fold/'
@@ -350,17 +348,26 @@ def cross_validation(dataset_name, model_args, configs, k_fold=5):
         if len(testset.examples) % 32 == 1:
             testset.examples = testset.examples[:-1]
 
-        train_sampler = BucketSampler(trainset, bucket_size=bucket_size, shuffle=True)
-        trainset_reader = DataLoader(trainset, batch_size=batch_size, sampler=train_sampler, collate_fn=collate_fn)
+        if 'PolitiFact' in dataset_name:
+            train_sampler = BalancedBatchSampler(trainset, batch_size=batch_size, shuffle=True)
+            trainset_reader = DataLoader(trainset, batch_sampler=train_sampler, collate_fn=collate_fn(trainset.claim_src_vocab, trainset.evidence_src_vocab))
+        else:
+            train_sampler = BucketSampler(trainset, bucket_size=bucket_size, shuffle=True)
+            trainset_reader = DataLoader(trainset, batch_size=batch_size, sampler=train_sampler, collate_fn=collate_fn(trainset.claim_src_vocab, trainset.evidence_src_vocab))
         test_sampler = BucketSampler(testset, bucket_size=bucket_size, shuffle=True)
-        testset_reader = DataLoader(testset, batch_size=batch_size, sampler=test_sampler, collate_fn=collate_fn)
+        testset_reader = DataLoader(testset, batch_size=batch_size, sampler=test_sampler, collate_fn=collate_fn(trainset.claim_src_vocab, trainset.evidence_src_vocab))
+        valid_sampler = BucketSampler(validset, bucket_size=bucket_size, shuffle=True)
+        validset_reader = DataLoader(validset, batch_size=batch_size, sampler=valid_sampler, collate_fn=collate_fn(trainset.claim_src_vocab, trainset.evidence_src_vocab))
 
+        model_args['claim_src_num'] = len(trainset.claim_src_vocab) + 1
+        model_args['evidence_src_num'] = len(trainset.evidence_src_vocab) + 1
+        
         model = FCModel(**model_args)
         if torch.cuda.device_count() > 1:
             model = nn.DataParallel(model)
     
         trainer = Trainer(model, **configs)
-        records_tmp = trainer.train(None, f'checkpoint/{i}/', trainset_reader, validset_reader, testset_reader)
+        records_tmp = trainer.train(None, f'checkpoint/{dataset_name}/{i}/', trainset_reader, validset_reader, testset_reader)
         plot_metric(f'i_1', metrics=['loss', 'accuracy'], sources=['train', 'valid', 'test'], records=records_tmp)
         plot_metric(f'i_2', metrics=['auc', 'f1_micro', 'f1_macro'], sources=['train', 'valid', 'test'], records=records_tmp)
         
