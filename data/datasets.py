@@ -116,6 +116,8 @@ class FCDataset(Dataset):
             self.model.to('cpu')
             torch.cuda.empty_cache()
 
+        set_seed(seed)
+
     def read_file(self, data_path):
         """
         Load examples from the .jsonl file
@@ -130,12 +132,14 @@ class FCDataset(Dataset):
         evidence_src_vocab = {}
         claim_src_idx = 1
         evidence_src_idx = 1
+
         with open(data_path, 'r') as f:
             for i, line in enumerate(tqdm(f)):
                 # if i > 3 :
                 #     break
                 data = json.loads(line.strip())
                 label = 1 if data['cred_label'] == 'True' else 0
+                correlation = data['correlation']
                 # convert sequences into torch.Tensor
                 claim_emb = tok2emb_sent(data['claim'], self.tokenizer, self.model, self.cuda)
                 claim_source = data['claim_source']
@@ -151,9 +155,9 @@ class FCDataset(Dataset):
                     if evidence['evidence_source'] not in evidence_src_vocab:
                         evidence_src_vocab[evidence['evidence_source']] = evidence_src_idx
                         evidence_src_idx += 1
-                
+
                 evidences_emb = tok2emb_list(evidences, self.tokenizer, self.model, self.cuda)
-                example = [claim_emb, claim_source, evidences_emb, evidences_source]
+                example = [claim_emb, claim_source, evidences_emb, evidences_source, correlation]
                 example = example + [label]
                 examples.append(example)
 
@@ -191,6 +195,6 @@ class FCDataset(Dataset):
             target {int}
         """
         example = self.examples[idx]
-        target = example[4]
+        target = example[5]
 
-        return (example[0], example[1], example[2], example[3], target)
+        return (example[0], example[1], example[2], example[3], example[4], target)

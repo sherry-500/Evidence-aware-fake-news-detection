@@ -98,8 +98,7 @@ class collate_fn(object):
 
             targets {torch.Tensor}: shape(batch_size, 1)
         """
-        # Each example's format : (<claim>{torch.Tensor}, <claim_source>{torch.Tensor}, evidences{torch.Tensor}, evidences_source{torch.Tensor}, <cred_label>{int})
-        claims, claims_source, evidences, evidences_source, targets = zip(*batch)
+        claims, claims_source, evidences, evidences_source, correlation, targets = zip(*batch)
         
         targets = torch.tensor(targets)
         # padding to the same length
@@ -108,25 +107,27 @@ class collate_fn(object):
         max_evi_len = max(tensor.shape[1] for tensor in evidences)
         max_evi_num = 5
         evidences = list(evidences)
+        evidence_num = [len(evidence) for evidence in evidences]
+        evidence_num = torch.tensor(evidence_num)
         evidences_source = list(evidences_source)
         for i, e in enumerate(evidences):
             evidences[i] = F.pad(e, (0, 0, 0, max_evi_len - e.shape[1], 0, 0))
             max_evi_num = max(max_evi_num, evidences[i].shape[0])
         for i, s in enumerate(evidences_source):
             evidences_source[i] = [self.evidence_src_vocab.get(src, 0) for src in evidences_source[i]]
-
+    
         # padding to the same evidence num 
         padded_evidences = pad_sequence(evidences, batch_first=True)
         padded_evidences = torch.stack([torch.cat((seqs, torch.zeros(max_evi_num - seqs.shape[0], * seqs.shape[1:], dtype=seqs.dtype)), dim=0) for seqs in padded_evidences])
-        evidence_num = [len(evidence_source) for evidence_source in evidences_source]
-        evidence_num = torch.tensor(evidence_num)
-        evidence_num_mask = (torch.arange(max_evi_num).expand(len(evidences_source), max_evi_num) < evidence_num.unsqueeze(1)).int()
+        evidence_num_mask = (torch.arange(max_evi_num).expand(len(evidences), max_evi_num) < evidence_num.unsqueeze(1)).int()
         evidences_source = [evidence_source + [0] * (max_evi_num - len(evidence_source)) for evidence_source in evidences_source]
-
+        correlation = [c + [-1] * (max_evi_num - len(c)) for c in correlation]
+        correlation = torch.tensor(correlation)
+        
         # reserve the length mask of original claim, claim_source, evidence, evidence_source
         claims_len_mask = (padded_claims != 0).any(dim=-1, keepdim=True).int().permute(0, 2, 1)
         evidences_len_mask = (padded_evidences != 0).any(dim=-1, keepdim=True).int().permute(0, 1, 3, 2)
 
         claims_source = torch.tensor(claims_source)
         evidences_source = torch.tensor(evidences_source)
-        return (padded_claims, claims_source, claims_len_mask, padded_evidences, evidences_source, evidences_len_mask, evidence_num_mask), targets
+        return (padded_claims, claims_source, claims_len_mask, padded_evidences, evidences_len_mask, evidence_num_mask, evidences_source), correlation, targets

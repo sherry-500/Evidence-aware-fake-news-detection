@@ -66,14 +66,30 @@ def df2json(df, file_path):
 
     f = open(file_path, 'w')
     df['cred_label'] = df['cred_label'].astype('str')
-    grouped = df.groupby(['cred_label', 'claim_text', 'claim_source'])
+    grouped = df.groupby(['cred_label', 'id_left', 'claim_text', 'claim_source'])
     for (key, group) in grouped:
+        claim_id = str(key[1])
         group_dict = {
             'cred_label': key[0],
-            'claim': key[1],
-            'claim_source': key[2],
-            'evidences': group[['evidence', 'evidence_source']].to_dict(orient='records')
+            'claim': key[2],
+            'claim_source': key[3],
+            # 'evidences': group['evidence'].tolist(),
+            'evidences': group[['evidence', 'evidence_source']].to_dict(orient='records'),
+            'correlation': group['correlation'].tolist()
         }
         group_json = json.dumps(group_dict)
         f.write(group_json + '\n')
     f.close()
+
+def load_evidences(path, topk=None):
+    evidences = {}
+    with open(path) as f:
+        lines = f.readlines()
+    for line in lines:
+        sample = json.loads(line)
+        if topk is None :
+            top = sample['evidences']
+        else:
+            top = sample['evidences'][:topk]
+        evidences[sample['id']] = top
+    return evidences

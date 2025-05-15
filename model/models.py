@@ -3,36 +3,50 @@ import torch.nn as nn
 import torch.nn.init as init
 import torch.nn.functional as F 
 
-class CoAttention(nn.Module):
-    def __init__(self, emb_dim, hidden_dim):
+class MACAttention(nn.Module):
+    def __init__(self, input_dim, output_dim, head_num=1):
         super().__init__()
-        # self.claim_len = claim_len
-        # self.evi_len = evidence_len
-        self.emb_dim = emb_dim
-        self.layer_norm1 = LayerNormalization(emb_dim, requires_grad=False)
-        self.layer_norm2 = LayerNormalization(hidden_dim, requires_grad=False)
-        # Parameters for computing the affinity matrix
-        self.weight_affinity = nn.Parameter(
-            init.xavier_normal_(torch.empty(emb_dim, emb_dim), gain=1.0),
-            requires_grad=True
-        )
-        # Parameters for attention computation
-        self.weight_c = nn.Parameter(
-            init.xavier_normal_(torch.empty(emb_dim, hidden_dim)),
-            requires_grad=True
-        )
-        self.weight_e = nn.Parameter(
-            init.xavier_normal_(torch.empty(emb_dim, hidden_dim)),
-            requires_grad=True
-        )
-        self.weight_hc = nn.Parameter(
-            torch.randn(hidden_dim, 1),
-            requires_grad=True
-        )
-        self.weight_he = nn.Parameter(
-            torch.randn(hidden_dim, 1),
-            requires_grad=True
-        )
+        self.head_num = head_num
+        self.W1 = nn.Linear(input_dim, output_dim, bias=False)
+        self.w2 = nn.Linear(output_dim, head_num, bias=False)
+        self.linear1 = nn.Linear(input_dim // 2, input_dim // 2 * head_num)
+        self.linear2 = nn.Linear(input_dim // 2, input_dim // 2 * head_num)
+    def forward(self, claim, claim_len_mask, evidence, evidence_len_mask):
+        """
+        Arguments:
+            claim: shape(batch_size, evi_num, claim_len, emb_dim)
+            claim_len_mask: shape(batch_size, evi_num, 1, claim_len)
+            evidence: shape(batch_size, evi_num, evidence_len, emb_dim)
+            evidence_len_mask: shape(batch_size, evi_num, 1, evidence_len)
+        Returns:
+            c_hat: shape: (batch_size, evi_num, 1, emb_dim)
+            e_hat: shape: (batch_size, evi_num, 1, emb_dim)
+        """
+        # c_hat = claim[:, :, 0, :].unsqueeze(2) # shape(batch_size, evi_num, 1, emb_dim)
+        # e_hat = evidence[:, :, 0, :].unsqueeze(2) # shape(batch_size, evi_num, 1, emb_dim)
+        c_hat = torch.mean(claim, dim=-2).unsqueeze(2) # shape(batch_size, evi_num, 1, emb_dim)
+        e_hat = torch.mean(evidence, dim=-2).unsqueeze(2) # shape(batch_size, evi_num, 1, emb_dim)
+        # claim = c_hat.expand(-1, -1, evidence.shape[2], -1) # shape(batch_size, evi_num, evidence_len, emb_dim)
+        # attention = torch.tanh(self.W1(torch.cat([evidence, claim], dim=-1))) # shape(batch_size, evi_num, evidence_len, output_dim)
+        # attention = self.w2(attention) # shape(batch_size, evi_num, evidence_len, head_num)
+        # evidence_len_mask = evidence_len_mask.permute(0, 1, 3, 2).expand(-1, -1, -1, self.head_num) # shape(batch_size, evi_num, evidence_len, head_num)
+        # attention_score = F.softmax(attention.masked_fill(~evidence_len_mask.type(torch.bool), -1e18), dim=-2)
+        # output = attention_score.transpose(-2, -1) @ evidence # shape(batch_size, evi_num, head_num, emb_dim)
+        # e_hat = output.flatten(start_dim=-2, end_dim=-1).unsqueeze(2) # shape(batch_size, evi_num, head_num * emb_dim)
+        c_hat = self.linear1(c_hat)
+        e_hat = self.linear2(e_hat)
+        return c_hat, e_hat
+
+class CoAttention(nn.Module):
+    def __init__(self, input_dim, output_dim, head_num=1):
+        super().__init__()
+        self.head_num = head_num
+        self.input_dim = input_dim
+        self.W1 = nn.Linear(input_dim, output_dim, bias=False)
+        self.w2 = nn.Linear(output_dim, head_num, bias=False)
+        self.W2 = nn.Linear(input_dim, output_dim, bias=False)
+        self.w1 = nn.Linear(output_dim, head_num, bias=False)
+        # self.linear = nn.Linear(input_dim // 2, input_dim // 2 * head_num)
 
     def forward(self, claim, claim_len_mask, evidence, evidence_len_mask):
         """
@@ -45,36 +59,35 @@ class CoAttention(nn.Module):
             c_hat: shape: (batch_size, evi_num, 1, emb_dim)
             e_hat: shape: (batch_size, evi_num, 1, emb_dim)
         """
-        claim = self.layer_norm1(claim)
-        evidence = self.layer_norm1(evidence)
-        # calculate the affinity between claim and evidence features 
-        # at all pairs of claim-locations and evidence-locations
-        # shape: (batch_size, evi_num, claim_len, evidence_len)
-        affinity_mtx = torch.tanh(claim @ self.weight_affinity @ evidence.permute(0, 1, 3, 2))
-        # affinity_mtx = claim @ self.weight_affinity @ evidence.permute(0, 1, 3, 2)
-        
-        # calculate the attention-based claim and evidence representations
-        # shape: (batch_size, evi_num, claim_len, hidden_dim)
-        H_c = torch.tanh(claim @ self.weight_c + affinity_mtx @ evidence @ self.weight_e)
-        # shape(batch_size, evi_num, evidence_len, hidden_dim)
-        H_e = torch.tanh(evidence @ self.weight_e + affinity_mtx.permute(0, 1, 3, 2) @ claim @ self.weight_c)
-        
-        # the claim attention map
-        # shape: (batch_size, evi_num, 1, claim_len)
-        attention_c = self.weight_hc.T @ H_c.permute(0, 1, 3, 2)
-        masked_a_c = F.softmax(attention_c.masked_fill(~claim_len_mask.type(torch.bool), -1e18), dim=-1)
-        # the evidence attention map
-        # shape: (batch_size, evi_num, 1, evidence_len)
-        attention_e = self.weight_he.T @ H_e.permute(0, 1, 3, 2)
-        masked_a_e = F.softmax(attention_e.masked_fill(~evidence_len_mask.type(torch.bool), -1e18), dim=-1)
+        claim1 = claim
+        # factor = torch.sum(claim_len_mask, dim=-1)
+        # factor[factor == 0] = 1
+        # c_hat = (torch.sum(claim, dim=-2) / factor).unsqueeze(2)
+        c_hat = torch.mean(claim, dim=-2).unsqueeze(2) # shape(batch_size, evi_num, 1, emb_dim)
+        claim = c_hat.expand(-1, -1, evidence.shape[2], -1) # shape(batch_size, evi_num, evidence_len, emb_dim)
+        attention = torch.tanh(self.W1(torch.cat([evidence, claim], dim=-1))) # shape(batch_size, evi_num, evidence_len, output_dim)
+        attention = self.w2(attention) # shape(batch_size, evi_num, evidence_len, head_num)
+        # attention = attention / np.sqrt(self.input_dim)
+        evidence_len_mask = evidence_len_mask.permute(0, 1, 3, 2).expand(-1, -1, -1, self.head_num) # shape(batch_size, evi_num, evidence_len, head_num)
+        attention_score1 = F.softmax(attention.masked_fill(~evidence_len_mask.type(torch.bool), -1e18), dim=-2) # shape(batch_size, evi_num, evidence_len, head_num)
+        output = attention_score1.transpose(-2, -1) @ evidence # shape(batch_size, evi_num, head_num, emb_dim)
+        e_hat = output.flatten(start_dim=-2, end_dim=-1).unsqueeze(2) # shape(batch_size, evi_num, head_num * emb_dim)
 
-        # weighted sum of claim and evidence features
-        # shape: (batch_size, evi_num, 1, emb_dim)
-        c_hat = (masked_a_c @ claim)
-        # shape: (batch_size, evi_num, 1, emb_dim)
-        e_hat = (masked_a_e @ evidence)
-
-        return c_hat, e_hat
+        # factor = torch.sum(evidence_len_mask.permute(0, 1, 3, 2), dim=-1)
+        # factor[factor == 0] = 1
+        # evidence = (torch.sum(evidence, dim=-2) / factor).unsqueeze(2)
+        evidence = torch.mean(evidence, dim=-2).unsqueeze(2) # shape(batch_size, evi_num, 1, emb_dim)
+        evidence = evidence.expand(-1, -1, claim1.shape[-2], -1) # shape(batch_size, evi_num, claim_len, emb_dim)
+        attention = torch.tanh(self.W2(torch.cat([claim1, evidence], dim=-1)))
+        attention = self.w1(attention) 
+        # attention = attention / np.sqrt(self.input_dim)
+        claim_len_mask = claim_len_mask.permute(0, 1, 3, 2).expand(-1, -1, -1, self.head_num)
+        attention_score2 = F.softmax(attention.masked_fill(~claim_len_mask.type(torch.bool), -1e18), dim=-2) # shape(batch_size, evi_num, claim_len, head_num)
+        output = attention_score2.transpose(-2, -1) @ claim1
+        c_hat = output.flatten(start_dim=-2, end_dim=-1).unsqueeze(2)
+        # c_hat = self.linear(c_hat) # shape(batch_size, evi_num, 1, emb_dim)
+        
+        return c_hat, e_hat, attention_s
 
 class LayerNormalization(nn.Module):
     def __init__(self, feats_num, epsilon=1e-6, requires_grad=True):
@@ -112,9 +125,6 @@ class HierarchyFeatureCombinator(nn.Module):
             feat : # shape: (batch_size, evi_num, 1, input_dim * 2)
         """
         feat1 = torch.cat([c_w, e_w], dim=-1) # shape: (batch_size, evi_num, 1, input_dim * 2)
-        # feat2 = torch.cat([c_p, e_p], dim=-1) # shape: (batch_size, evi_num, 1, input_dim * 2)
-        # feat3 = torch.cat([c_a, e_a], dim=-1) # shape: (batch_size, evi_num, 1, input_dim * 2)
-        # feat = feat1 + feat2 # shape: (batch_size, evi_num, 1, input_dim * 2)
         return feat1
 
 class ConcatAttention(nn.Module):
@@ -152,107 +162,140 @@ class Attention(nn.Module):
         """
         attention = F.softmax(cosine_sim, dim=-1).unsqueeze(1) # shape: (batch_size, 1, evi_num)
         x = attention @ x # shape: (batch_size, 1, input_dim)
-        x = torch.cat([x, cosine_sim.unsqueeze(1)], dim=-1)
-        # x = torch.sum(x, dim=1)
         return x
 
 class MLP(nn.Module):
     def __init__(self, input_dim, output_dim):
         super().__init__()
         # self.dropout = nn.Dropout(0.2)
-        self.fc1 = nn.Linear(input_dim, input_dim // 12)
+        # self.fc0 = nn.Linear(input_dim, input_dim * 2)
         # self.relu = nn.ReLU()
+        self.fc1 = nn.Linear(input_dim, input_dim // 48)
         # self.fc2 = nn.Linear(input_dim // 4, input_dim // 16)
         self.gelu = nn.GELU()
-        self.fc3 = nn.Linear(input_dim // 12, output_dim)
+        self.fc3 = nn.Linear(input_dim // 48, output_dim)
 
     def forward(self, x):
-        # out = self.dropout(x)
         out = self.fc1(x)
-        # out = self.gelu(out)
-        # out = self.fc2(out)
-        # out = self.gelu(out)
         out = self.fc3(out)
-
         return out
 
+class Similarity(nn.Module):
+    def __init__(self, emb_dim):
+        super().__init__()
+        # self.claim_len = claim_len
+        # self.evi_len = evidence_len
+        self.emb_dim = emb_dim
+        self.weight_affinity = nn.Linear(emb_dim * 3, 1, bias=False)
+
+    def forward(self, claim, evidence):
+        """
+        Arguments:
+            claim: shape(batch_size, evi_num, emb_dim)
+            evidence: shape(batch_size, evi_num, emb_dim)
+        Returns:
+            correlation: shape: (batch_size, evi_num)
+        """
+        # claim = self.layer_norm1(claim)
+        # evidence = self.layer_norm1(evidence)
+        # calculate the affinity between claim and evidence features 
+        # at all pairs of claim-locations and evidence-locations
+        ce = claim * evidence # shape(batch_size, evi_num, emb_dim)
+        concatenated = torch.cat([claim, evidence, ce], dim=-1)
+        affinity_mtx = torch.tanh(self.weight_affinity(concatenated)) # shape(batch_size, evi_num, 1)
+        affinity_mtx = affinity_mtx.squeeze(-1) # shape: (batch_size, evi_num)
+        
+        return affinity_mtx
+
 class FCModel(nn.Module):
-    def __init__(self, hidden_dim, emb_dim, claim_src_num, evidence_src_num, top_k=5):
+    def __init__(self, hidden_dim, emb_dim, claim_src_num, evidence_src_num, evidence_src_dim, model_type=0, top_k=5, visualize=False):
         super().__init__()
         print(claim_src_num, evidence_src_num)
         self.emb_dim = emb_dim
         self.hidden_dim = hidden_dim
-        self.claim_src_dim = 10
-        self.evidence_src_dim = 20
+        self.claim_src_dim = 128
+        self.evidence_src_dim = evidence_src_dim
         self.top_k = top_k
+        # model_type
+        # 0: 
+        # 1: use claims' source
+        # 2: use evidences' source
+        # 3: use claim's source and evidences' source
+        self.model_type = model_type
+        self.visualize = visualize
 
         self.claim_src = nn.Embedding(claim_src_num, self.claim_src_dim)
-        self.evidence_src = nn.Embedding(evidence_src_num, self.evidence_src_dim)
+        if model_type == 2 or model_type == 3:
+            self.evidence_src = nn.Embedding(evidence_src_num, self.evidence_src_dim)
+            print(self.evidence_src_dim)
         self.layer_norm = LayerNormalization(emb_dim)
         self.linear_c = nn.Linear(emb_dim, hidden_dim)
         self.linear_e = nn.Linear(emb_dim, hidden_dim)
+        self.similarity = Similarity(hidden_dim * 1)
         self.relu = nn.ReLU()
         self.co_attention_w = CoAttention(hidden_dim, hidden_dim)
-        # self.phrase_extractor_c = PhraseFeatureExtractor(self.emb_dim, self.emb_dim // 16, filter_dims=[3, 5, 6])
-        # self.phrase_extractor_e = PhraseFeatureExtractor(self.emb_dim, self.emb_dim // 16, filter_dims=[3, 5, 6])
-        # self.article_encoder = TransformerEncoder(layer_num=1, head_num=1, feats_num=self.emb_dim // 2, hidden_dim=self.hidden_dim, dropout_prob=0.3)
+        # self.co_attention_w = MACAttention1(hidden_dim * 2, hidden_dim, 1)
         self.hierarchy_feature_combinator = HierarchyFeatureCombinator(self.emb_dim)
-        # self.document_attention_layer = ConcatAttention(hidden_dim * 2, hidden_dim)
+        # self.document_attention_layer = ConcatAttention(hidden_dim * 2, hidden_dim // 2)
         self.document_attention_layer = Attention()
-        # self.output_layer = nn.Linear(self.emb_dim * 2, 1)
-        self.output_layer = MLP(hidden_dim * 2 + top_k + self.claim_src_dim, 1)
+        # self.document_attention_layer = CoAttention(hidden_dim, hidden_dim)
+        input_dim = hidden_dim * 2 * 1
+        if model_type == 1 or model_type == 3:
+            input_dim += self.claim_src_dim
+        if model_type == 2 or model_type == 3:
+            input_dim += self.evidence_src_dim
+        self.output_layer = MLP(input_dim, 1)
 
-    def forward(self, claims, claims_source, claims_len_mask, evidences, evidences_source, evidences_len_mask, evidence_num_mask):
+    def forward(self, claims, claims_source, claims_len_mask, evidences, evidences_len_mask, evidence_num_mask, evidences_source):
         """
         Arguments:
             claims: shape(batch_size, claim_len, emb_dim)
-            claims_source: shape(batch_size, claim_source_len, emb_dim)
+            claims_source: shape(batch_size)
             claims_len_mask: shape(batch_size, 1, claim_len)
             evidences: shape(batch_size, evi_num, evi_len, emb_dim)
-            evidences_source: shape(batch_size, evi_num, evi_source_len, emb_dim)
+            evidences_source: shape(batch_size, evi_num)
             evidences_len_mask: shape(batch_size, evi_num, 1, evidence_len)
         Returns:
             output: shape(batch_size)
         """
         evi_num = evidences.shape[1]
-        # split_evidence = torch.unbind(evidences, dim=1)
-        # split_evi_len_mask = torch.unbind(evidences_len_mask, dim=1)
-
+        
         claims = self.layer_norm(claims)
         evidences = self.layer_norm(evidences)
         
         claims = self.linear_c(claims)
         evidences = self.linear_e(evidences)
+
+        outputs = self.co_attention_w(
+            claims.unsqueeze(1).expand(-1, evi_num, -1, -1),
+            claims_len_mask.unsqueeze(1).expand(-1, evi_num, -1, -1),
+            evidences, evidences_len_mask
+        )   
+        c_w_hat = outputs[0] # shape: (batch_size, evi_num, 1, emb_dim)
+        e_w_hat = outputs[1] # shape: (batch_size, evi_num, 1, emb_dim)
         
-        c_w_hat, e_w_hat = self.co_attention_w(
-            claims.unsqueeze(1).expand(-1, evi_num, -1, -1),
-            claims_len_mask.unsqueeze(1).expand(-1, evi_num, -1, -1),
-            evidences, evidences_len_mask
-        )   # shape: (batch_size, evi_num, 1, emb_dim)
-
-        c_w_hat, e_w_hat = self.co_attention_w(
-            claims.unsqueeze(1).expand(-1, evi_num, -1, -1),
-            claims_len_mask.unsqueeze(1).expand(-1, evi_num, -1, -1),
-            evidences, evidences_len_mask
-        )   # shape: (batch_size, evi_num, 1, emb_dim)
-
+        if self.visualize:
+            attention_map_e = outputs[2]  # shape(batch_size, evi_num, evidence_len, head_num)
+            attention_map_c = outputs[3]  # shape(batch_size, evi_num, claim_len, head_num)
+            
         # compute cosine similarity
         c_w_hat = c_w_hat.squeeze(2) # shape: (batch_size, evi_num, emb_dim)
         e_w_hat = e_w_hat.squeeze(2) # shape: (batch_size, evi_num, emb_dim)
-        cosine_sim = F.cosine_similarity(c_w_hat, e_w_hat, dim=-1) # shape: (batch_size, evi_num)
-        cosine_sim = cosine_sim.masked_fill(~evidence_num_mask.type(torch.bool), -2)
+        cosine_sim = self.similarity(c_w_hat, e_w_hat)
+        cosine_sim = cosine_sim.masked_fill(~evidence_num_mask.type(torch.bool), -1)
         top_k_cosine_sim, top_k_indices = torch.topk(cosine_sim, self.top_k, dim=1, largest=True, sorted=True) # shape: (batch_size, top_k)
-        top_k_indices_1 = top_k_indices.unsqueeze(2).repeat(1, 1, self.hidden_dim) # shape: (batch_size, top_k, emb_dim)
+        top_k_indices_1 = top_k_indices.unsqueeze(2).repeat(1, 1, c_w_hat.shape[-1]) # shape: (batch_size, top_k, emb_dim)
         e_w_hat = torch.gather(e_w_hat, 1, top_k_indices_1) # shape: (batch_size, top_k, emb_dim)
         c_w_hat = torch.gather(c_w_hat, 1, top_k_indices_1) # shape: (batch_size, top_k, emb_dim)
 
-        # extend claim and evidence with their source
-        claims_source = self.claim_src(claims_source) # shape: (batch_size, claim_src_emb)
-        claims_source = claims_source.unsqueeze(1).expand(-1, self.top_k, -1) # shape: (batch_size, top_k, claim_src_emb)
-        # evidences_source = torch.gather(evidences_source, 1, top_k_indices) # shape: (batch_size, top_k)
-        # evidences_source = self.evidence_src(evidences_source) # shape: (batch_size, top_k, evidence_src_emb)
-        c_w_hat = torch.cat([c_w_hat, claims_source], dim=-1)
-        # e_w_hat = torch.cat([e_w_hat, evidences_source], dim=-1)
+        if self.model_type == 1 or self.model_type == 3:
+            claims_source = self.claim_src(claims_source) # shape: (batch_size, claim_src_emb)
+            claims_source = claims_source.unsqueeze(1).expand(-1, c_w_hat.shape[1], -1) # shape: (batch_size, top_k, claim_src_emb)
+            c_w_hat = torch.cat([c_w_hat, claims_source], dim=-1)
+        if self.model_type == 2 or self.model_type == 3:
+            evidences_source = torch.gather(evidences_source, 1, top_k_indices)
+            evidences_source = self.evidence_src(evidences_source) # shape: (batch_size, top_k, evidence_src_emb)
+            e_w_hat = torch.cat([e_w_hat, evidences_source], dim=-1)
 
         # combine the features from the three level
         combined_feats = self.hierarchy_feature_combinator(c_w_hat, e_w_hat) # shape: (batch_size, top_k, emb_dim * 2)
@@ -266,4 +309,10 @@ class FCModel(nn.Module):
         output = self.output_layer(document_feats) # shape: (batch_size, 1)
         output = output.squeeze() # shape: (batch_size)
 
-        return output
+        if self.visualize:
+            return cosine_sim, output, attention_map_c, attention_map_e
+        else:
+            return cosine_sim, output
+
+    def set_visualize(self):
+        self.visualize = True

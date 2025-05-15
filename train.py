@@ -11,6 +11,10 @@ import matplotlib.pyplot as plt
 from collections import defaultdict
 import math
 import heapq
+import glob
+import re
+import pickle
+import statistics
 
 import argparse
 import yaml
@@ -54,8 +58,10 @@ if __name__ == "__main__":
     args = parse_args()
 
     model_args = {
-        'hidden_dim': 48,
-        'emb_dim': 768
+        'model_type': 0,
+        'hidden_dim': 200,
+        'emb_dim': 768,
+        'evidence_src_dim': 192
     }
 
     configs = {
@@ -64,6 +70,7 @@ if __name__ == "__main__":
         'max_epoch': max_epochs,
         'batch_size': batch_size,
         'gradient_accumulation_steps': 1,
+        'alpha': 0.01,
         'cuda': True
     }
 
