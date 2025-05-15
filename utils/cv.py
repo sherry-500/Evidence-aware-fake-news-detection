@@ -323,7 +323,7 @@ def cross_validation(dataset_name, model_args, configs, k_fold=5):
     tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
     bert_model = BertModel.from_pretrained('bert-base-uncased')
 
-    validset = read_data(f'/Datasets/{dataset_name}/mapped_data/', top_evidences, r'dev_ori.tsv')
+    validset = read_data(f'Datasets/{dataset_name}/mapped_data/', top_evidences, r'dev_ori.tsv')
     valid_json_file_path = 'valid.jsonl'
     df2json(validset, valid_json_file_path)
     validset = FCDataset(valid_json_file_path, tokenizer, bert_model, cuda=True)
