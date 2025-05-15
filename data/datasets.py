@@ -82,6 +82,15 @@ def tok2emb_list(sentences, tokenizer, model, cuda):
             # attention_mask = attention_mask.to('cpu')
     return word_embeddings
 
+def set_seed(seed):
+    random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed) 
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
 class FCDataset(Dataset):
     """
     Fake News Detection Dataset
@@ -116,7 +125,7 @@ class FCDataset(Dataset):
             self.model.to('cpu')
             torch.cuda.empty_cache()
 
-        set_seed(seed)
+        set_seed(42)
 
     def read_file(self, data_path):
         """

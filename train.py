@@ -33,7 +33,7 @@ import warnings
 warnings.filterwarnings("ignore")
     
 def set_seed(seed):
-    random.seed(3407)
+    random.seed(seed)
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed(seed)
@@ -58,8 +58,8 @@ if __name__ == "__main__":
     args = parse_args()
 
     model_args = {
-        'model_type': 0,
-        'hidden_dim': 200,
+        'model_type': 1,
+        'hidden_dim': 100,
         'emb_dim': 768,
         'evidence_src_dim': 192
     }

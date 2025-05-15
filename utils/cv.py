@@ -8,7 +8,7 @@ import re
 from collections import defaultdict
 
 from model.models import FCModel
-from data.dataloader import BucketSampler, collate_fn
+from data.dataloader import BucketSampler, BalancedBatchSampler, collate_fn
 from data.datasets import FCDataset
 from data.preprocess import df2json, load_evidences
 from utils.metric import Evaluator, plot_metric
