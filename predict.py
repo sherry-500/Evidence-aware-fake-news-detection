@@ -2,6 +2,7 @@ import shutil
 import torch
 import pickle
 import json
+import argparse
 from data.datasets import tok2emb_list, tok2emb_sent
 from utils.visualize import render_bg_color
 from transformers import BertModel, BertTokenizer
@@ -102,15 +103,27 @@ def predict(example, model_directory, bert_tokenizer, bert_model, cuda=True, vis
     print()
     print(f'\033[1mPrediction: [{label.item()}]\033[0m')
 
+def parse_args():
+    ap = argparse.ArgumentParser("arguments for bert-nli training")
+    ap.add_argument('--model_path', type=str, default='Snopes')
+    ap.add_argument('--input', type=str, default='')
+    args = ap.parse_args()
+    return args
+
 if __name__ == "__main__":
+    args = parse_args()
+
     tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
     bert_model = BertModel.from_pretrained('bert-base-uncased')
 
-    with open('test_4.jsonl', 'r') as f:
-        for i, line in enumerate(f):
-            data = json.loads(line.strip())
-            if "actor christopher walken planning making bid us presidency 2008" in data['claim']:
-                # data = json.loads(line.strip())
-                target = 1 if data['cred_label'] == 'True' else 0
-                predict(line, 'checkpoint/PolitiFact/0', tokenizer, bert_model, cuda=False)
+    if args.input == '':
+        with open('test_4.jsonl', 'r') as f:
+            for i, line in enumerate(f):
+                data = json.loads(line.strip())
                 break
+    else:
+        data = json.loads(args.input.strip())
+
+    target = 1 if data['cred_label'] == 'True' else 0
+    print(f'The target: [{data["cred_label"]}]')
+    predict(line, args.model_path, tokenizer, bert_model, cuda=False)

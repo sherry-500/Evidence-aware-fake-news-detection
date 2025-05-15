@@ -7,11 +7,14 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import math
 import heapq
+import argparse
 
 from utils.metric import Evaluator
+from utils.cv import read_data
 from model.models import FCModel
 from data.datasets import FCDataset
 from data.dataloader import BucketSampler, collate_fn
+from data.preprocess import load_evidences
 
 import torch
 from torch.utils.data import Dataset, DataLoader, Sampler
@@ -23,11 +26,6 @@ import warnings
 warnings.filterwarnings("ignore")
 
 def test_model(fold_id, model_path, dataset_reader, name):
-    model_args = {
-        # 'hidden_dim': trial.params['hidden_dim'],
-        'hidden_dim': 48,
-        'emb_dim': 768
-    }
     model = torch.load(model_path)
     
     model.to('cuda')
@@ -93,22 +91,35 @@ def test_model(fold_id, model_path, dataset_reader, name):
 
     return evaluator
 
-if __name__ == "__main__":
-    bucket_size = 128
-    batch_size = 32
-    max_epochs = 1
+def parse_args():
+    ap = argparse.ArgumentParser("arguments for bert-nli training")
+    ap.add_argument('--dataset', type=str, default='Snopes', help='[Snopes, Politifact]')
+    args = ap.parse_args()
+    return args
 
+if __name__ == "__main__":
+    args = parse_args()
+    dataset = args.dataset
+    bucket_size = 256
+    batch_size = 32
+
+    top_evidences = load_evidences(f'reoutput/{dataset}.json')
+    
     tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
     bert_model = BertModel.from_pretrained('bert-base-uncased')
 
     for i in range(5):
-        dataset_path1 = f'Datasets/{dataset}/mapped_data/5fold/train_{i}.tsv'
-        trainset = pd.read_csv(dataset_path1, sep='\t', usecols=['cred_label', 'claim_text', 'claim_source', 'evidence', 'evidence_source'])
+        directory_path = f'Datasets/{dataset}/mapped_data/5fold/'
+        dataset_path1 = r'train_' + str(i) + ".tsv"
+        trainset = read_data(directory_path, top_evidences, dataset_path1)
         train_json_file_path = f'train_{i}.jsonl'
         df2json(trainset, train_json_file_path)
         trainset = FCDataset(train_json_file_path, tokenizer, bert_model, cuda=True)
         
+        dataset_path2 = r'test_' + str(i) + ".tsv"
+        testset = read_data(directory_path, top_evidences, dataset_path2)
         test_json_file_path = f'test_{i}.jsonl'
+        df2json(testset, test_json_file_path)
         testset = FCDataset(test_json_file_path, tokenizer, bert_model, cuda=True)
         if len(testset.examples) % 32 == 1:
             testset.examples = testset.examples[:-1]
