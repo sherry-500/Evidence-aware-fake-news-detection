@@ -337,10 +337,6 @@ def cross_validation(dataset_name, model_args, configs, k_fold=5):
     Arguments:
         dataset: 'Snopes' or 'PolitiFact'
     """
-    bucket_size = 256
-    batch_size = 32
-    max_epochs = 1
-
     fold_num = []
 
     top_evidences = load_evidences(f'reoutput/{dataset_name}.json')

@@ -50,7 +50,7 @@ def parse_args():
 if __name__ == "__main__":
     bucket_size = 256
     batch_size = 32
-    max_epochs = 100
+    max_epochs = 2
     seed = 42
     
     set_seed(seed)
