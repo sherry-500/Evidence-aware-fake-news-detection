@@ -14,7 +14,7 @@ from utils.cv import read_data
 from model.models import FCModel
 from data.datasets import FCDataset
 from data.dataloader import BucketSampler, collate_fn
-from data.preprocess import load_evidences
+from data.preprocess import load_evidences, df2json
 
 import torch
 from torch.utils.data import Dataset, DataLoader, Sampler
@@ -34,12 +34,12 @@ def test_model(fold_id, model_path, dataset_reader, name):
     labels = []
     outputs = []
     with torch.no_grad():
-        for index, (inputs, targets) in enumerate(dataset_reader):
+        for index, (inputs, _, targets) in enumerate(dataset_reader):
             targets = targets.float()
             inputs = tuple(input_tensor.to('cuda') for input_tensor in inputs)
             targets = targets.to('cuda')
     
-            logits = model(*inputs)
+            _, logits = model(*inputs)
     
             labels += targets.to('cpu').tolist()
             outputs += logits.to('cpu').tolist()
@@ -116,7 +116,7 @@ if __name__ == "__main__":
         df2json(trainset, train_json_file_path)
         trainset = FCDataset(train_json_file_path, tokenizer, bert_model, cuda=True)
         
-        dataset_path2 = r'test_' + str(i) + ".tsv"
+        dataset_path2 = r'test_' + str(i) + "_ori.tsv"
         testset = read_data(directory_path, top_evidences, dataset_path2)
         test_json_file_path = f'test_{i}.jsonl'
         df2json(testset, test_json_file_path)
@@ -127,4 +127,4 @@ if __name__ == "__main__":
         test_sampler = BucketSampler(testset, bucket_size=bucket_size, shuffle=True)
         testset_reader = DataLoader(testset, batch_size=batch_size, sampler=test_sampler, collate_fn=collate_fn(trainset.claim_src_vocab, trainset.evidence_src_vocab))
 
-        test_model(i, model_path, testset_reader, 'testset')
+        test_model(i, f'checkpoint/{dataset}/{i}/checkpoint.pt', testset_reader, 'testset')

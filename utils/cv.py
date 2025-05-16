@@ -339,6 +339,9 @@ def cross_validation(dataset_name, model_args, configs, k_fold=5):
     """
     fold_num = []
 
+    batch_size = configs['batch_size']
+    bucket_size = 256
+
     top_evidences = load_evidences(f'reoutput/{dataset_name}.json')
 
     tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
@@ -389,8 +392,8 @@ def cross_validation(dataset_name, model_args, configs, k_fold=5):
     
         trainer = Trainer(model, **configs)
         records_tmp = trainer.train(None, f'checkpoint/{dataset_name}/{i}/', trainset_reader, validset_reader, testset_reader)
-        plot_metric(f'i_1', metrics=['loss', 'accuracy'], sources=['train', 'valid', 'test'], records=records_tmp)
-        plot_metric(f'i_2', metrics=['auc', 'f1_micro', 'f1_macro'], sources=['train', 'valid', 'test'], records=records_tmp)
+        plot_metric(f'{i}_1', metrics=['loss', 'accuracy'], sources=['train', 'valid', 'test'], records=records_tmp)
+        plot_metric(f'{i}_2', metrics=['auc', 'f1_micro', 'f1_macro'], sources=['train', 'valid', 'test'], records=records_tmp)
         
         if i == 0:
             records = records_tmp

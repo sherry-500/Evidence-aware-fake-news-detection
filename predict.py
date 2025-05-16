@@ -88,7 +88,10 @@ def predict(example, model_directory, bert_tokenizer, bert_model, cuda=True, vis
                 break
             print(underline)
             # print_color_text(claim_token, attention_c)
-            print(f"\033[1mClaim:[{data['cred_label']}]\033[0m", end=' ')
+            if 'cred_label' in data:
+                print(f"\033[1mClaim:[{data['cred_label']}]\033[0m", end=' ')
+            else:
+                print(f"\033[1mClaim:\033[0m", end=' ')
             render_bg_color(claim_token, attention_c)
             print()
             print(f'\033[1mRelevant Article {i}:\033[0m', end=' ')
@@ -105,7 +108,7 @@ def predict(example, model_directory, bert_tokenizer, bert_model, cuda=True, vis
 
 def parse_args():
     ap = argparse.ArgumentParser("arguments for bert-nli training")
-    ap.add_argument('--model_path', type=str, default='Snopes')
+    ap.add_argument('--model_path', type=str, default='checkpoint/PolitiFact/0')
     ap.add_argument('--input', type=str, default='')
     args = ap.parse_args()
     return args
@@ -122,8 +125,10 @@ if __name__ == "__main__":
                 data = json.loads(line.strip())
                 break
     else:
-        data = json.loads(args.input.strip())
+        line = args.input.strip()
+        data = json.loads(line)
 
-    target = 1 if data['cred_label'] == 'True' else 0
-    print(f'The target: [{data["cred_label"]}]')
+    if 'cred_label' in data:
+        target = 1 if data['cred_label'] == 'True' else 0
+        print(f'The target: [{data["cred_label"]}]')
     predict(line, args.model_path, tokenizer, bert_model, cuda=False)
